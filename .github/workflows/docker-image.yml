@@ -1,17 +1,57 @@
-value ?= value.env
-include $(value)
-export $(shell sed 's/=.*//' $(value))
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
 
-.PHONY: build start push
-build: build-version
-build-version:
-	docker build -t ${DOCKER_USERNAME}/${REPO_NAME}:${VERSION}  .
-tag-latest:
-	docker tag ${DOCKER_USERNAME}/${REPO_NAME}:${VERSION} ${DOCKER_USERNAME}/${REPO_NAME}:latest
-# start:
-#     docker run -it --rm ${IMAGE}:${VERSION}/bin/bash
-login:
-	echo ${DOCKER_PASSWORD} | docker login -u ${DOCKER_USERNAME} --password-stdin
-#   docker login -u ${DOCKER_NAME} -p ${DOCKER_PASSWORD}
-push:   login tag-latest
-	docker push ${DOCKER_USERNAME}/${REPO_NAME}; docker push ${DOCKER_USERNAME}/${REPO_NAME}:latest
+name: AWS WORKFLOW
+
+jobs:
+  
+    runs-on: ubuntu-latest
+
+    steps:    
+    - name: Checkout
+      uses: actions/checkout@v2
+
+
+    - name: Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    - name: Build and push the image to Amazon ECR
+      id: build-image
+      env:
+        ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        ECR_REPOSITORY: ${{ secrets.REPO_NAME }}
+        IMAGE_TAG: "latest"
+
+      run: |
+        # Build a docker container and push it to ECR 
+        echo "ECR Login"
+       aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 779527285137.dkr.ecr.us-east-1.amazonaws.com
+       docker build -t code .
+        echo "Pushing image to ECR..."
+       docker push 779527285137.dkr.ecr.us-east-1.amazonaws.com/code:latest
+        echo "::set-output name=image::$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+    
+       
+    - name: Login For EKS
+      uses: aws-actions/configure-aws-credentials@v1
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}   
+        aws-region: us-east-2
+    
+    - name: Deploy into EKS  
+      id: deploy-image
+      run: |
+        aws eks --region us-east-2 update-kubeconfig --name vaibhav
+        helm upgrade --recreate-pods -i octo-app octo-app
+  sonarqube:
+    name: sonarqube
+    needs: deployment
+    uses: vaibhavrathod-1/sonarqube-scan/.github/workflows/build.yml@main
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}

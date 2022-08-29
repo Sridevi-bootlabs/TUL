@@ -2,4 +2,10 @@
 # COPY . /usr/share/nginx/html
 
 FROM nginx:alpine
-COPY . /usr/share/nginx/html
+COPY . /usr/share/nginx/html   
+
+
+
+
+
+
